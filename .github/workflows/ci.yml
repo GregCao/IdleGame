@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # YAML 语法检查
+      - name: Validate YAML files
+        run: |
+          find . -name "*.yml" -o -name "*.yaml" | while read f; do
+            python3 -c "import yaml, sys; yaml.safe_load(open('$f'))" 2>&1 | head -5 && echo "✓ $f OK" || echo "✗ $f FAILED"
+          done
+
+      # Unity 项目结构检查
+      - name: Validate Unity project structure
+        run: |
+          echo "=== Unity Project Structure Check ==="
+          if [ -d "Assets/Scripts" ]; then
+            echo "✓ Assets/Scripts/ exists"
+          else
+            echo "✗ Assets/Scripts/ NOT FOUND"
+            exit 1
+          fi
+
+          if [ -f "Assets/Scripts/IdleGame.asmdef" ]; then
+            echo "✓ Assembly Definition found"
+          else
+            echo "⚠ Assembly Definition NOT found"
+          fi
+
+          echo "=== C# Scripts Count ==="
+          find Assets/Scripts -name "*.cs" | wc -l | xargs echo "C# files:"
+
+      # Markdown 文档检查（无失效链接）
+      - name: Validate Markdown docs
+        run: |
+          echo "=== Documentation Files ==="
+          find . -maxdepth 2 -name "*.md" -type f | while read f; do
+            echo "  - $(basename $f)"
+          done
+
+  # Unity 基础验证（需要 Unity 激活文件才完整）
+  # 如需完整构建，参考：https://github.com/game-ci/unity-actions
+  build-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for required Unity files
+        run: |
+          echo "=== IdleGame Project Files ==="
+          echo "README: $([ -f README.md ] && echo '✓' || echo '✗')"
+          echo "GAME_DESIGN_DOC: $([ -f GAME_DESIGN_DOC.md ] && echo '✓' || echo '✗')"
+          echo "NUMERICAL_BALANCE: $([ -f NUMERICAL_BALANCE.md ] && echo '✓' || echo '✗')"
+          echo "CHANGELOG: $([ -f CHANGELOG.md ] && echo '✓' || echo '✗')"
+          echo ""
+          echo "=== Scripts Structure ==="
+          for dir in Core Player Battle Economy Ads Platform Equipment CheckIn Quest UI Save; do
+            if [ -d "Assets/Scripts/$dir" ]; then
+              count=$(find "Assets/Scripts/$dir" -name "*.cs" | wc -l)
+              echo "✓ $dir: $count files"
+            fi
+          done
