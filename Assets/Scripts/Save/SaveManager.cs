@@ -24,6 +24,10 @@ public class SaveManager : MonoBehaviour
     private const string EQUIPMENT_DATA_KEY = "EquipmentData";
     private float _autoSaveTimer = 0f;
 
+    // 保存事件监听器的引用（用于正确取消订阅）
+    private UnityEngine.Events.UnityAction<long> _onGoldChangedHandler;
+    private UnityEngine.Events.UnityAction<int> _onLevelUpHandler;
+
     private void Start()
     {
         // 开始时加载数据
@@ -56,8 +60,10 @@ public class SaveManager : MonoBehaviour
     {
         if (GameManager.Instance?.PlayerManager != null)
         {
-            GameManager.Instance.PlayerManager.OnLevelUp.AddListener(_ => SaveAllData());
-            GameManager.Instance.PlayerManager.OnGoldChanged.AddListener(_ => SaveAllData());
+            _onGoldChangedHandler = OnGoldChangedSave;
+            _onLevelUpHandler = OnLevelUpSave;
+            GameManager.Instance.PlayerManager.OnGoldChanged.AddListener(_onGoldChangedHandler);
+            GameManager.Instance.PlayerManager.OnLevelUp.AddListener(_onLevelUpHandler);
         }
     }
 
@@ -68,9 +74,27 @@ public class SaveManager : MonoBehaviour
     {
         if (GameManager.Instance?.PlayerManager != null)
         {
-            GameManager.Instance.PlayerManager.OnLevelUp.RemoveListener(_ => SaveAllData());
-            GameManager.Instance.PlayerManager.OnGoldChanged.RemoveListener(_ => SaveAllData());
+            if (_onGoldChangedHandler != null)
+                GameManager.Instance.PlayerManager.OnGoldChanged.RemoveListener(_onGoldChangedHandler);
+            if (_onLevelUpHandler != null)
+                GameManager.Instance.PlayerManager.OnLevelUp.RemoveListener(_onLevelUpHandler);
         }
+    }
+
+    /// <summary>
+    /// 金币变化时自动存档
+    /// </summary>
+    private void OnGoldChangedSave(long newGold)
+    {
+        SaveAllData();
+    }
+
+    /// <summary>
+    /// 升级时自动存档
+    /// </summary>
+    private void OnLevelUpSave(int newLevel)
+    {
+        SaveAllData();
     }
 
     /// <summary>

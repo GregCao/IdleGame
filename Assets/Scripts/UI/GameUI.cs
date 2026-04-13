@@ -4,19 +4,22 @@ using TMPro;
 using System;
 using System.Collections.Generic;
 using IdleGame;
-using IdleGame.Audio;
-using IdleGame.Effects;
 
 /// <summary>
-/// UI管理器 - 负责所有界面更新和事件绑定
-/// 改进版：使用 UIPanelController 管理面板切换，集成 DOTweenAnimations
+/// 游戏UI总控制器 - 统一管理所有UI组件和面板
+/// 挂载在 Canvas 根节点上
+/// 
+/// Phase 3.1 改进：
+/// - 完善所有 Update 方法
+/// - 集成 UIPanelController 面板管理
+/// - 集成 DOTweenAnimations 动画系统
+/// - 集成 DamagePopupManager 伤害数字系统
 /// </summary>
-public class UIManager : MonoBehaviour
+public class GameUI : MonoBehaviour
 {
-    public static UIManager Instance { get; private set; }
+    public static GameUI Instance { get; private set; }
 
-    [Header("=== 面板控制器引用 ===")]
-    [SerializeField] private UIPanelController _panelController;
+    #region === SerializeField 组件引用 ===
 
     [Header("=== 状态栏 ===")]
     [SerializeField] private TextMeshProUGUI _goldText;
@@ -31,10 +34,10 @@ public class UIManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI _monsterHealthText;
     [SerializeField] private TextMeshProUGUI _monsterLevelBadge;
 
-    [Header("=== 底部功能栏 ===")]
+    [Header("=== 升级按钮 ===")]
     [SerializeField] private Button _upgradeButton;
     [SerializeField] private TextMeshProUGUI _upgradeCostText;
-    [SerializeField] private GameObject _upgradeEffectGlow;
+    [SerializeField] private GameObject _upgradeEffectGlow;  // 可升级时发光
 
     [Header("=== 激励视频按钮 ===")]
     [SerializeField] private Button _offlineDoubleButton;
@@ -73,17 +76,37 @@ public class UIManager : MonoBehaviour
     [Header("=== 颜色配置 ===")]
     [SerializeField] private Color _canAffordColor = new Color(0.2f, 0.9f, 0.2f);
     [SerializeField] private Color _cannotAffordColor = new Color(0.6f, 0.6f, 0.6f);
+    [SerializeField] private Color _goldColor = new Color(1f, 0.84f, 0f);
+    [SerializeField] private Color _critColor = new Color(1f, 0.3f, 0.3f);
+
+    #endregion
+
+    #region === 私有变量 ===
+
+    // 面板控制
+    private UIPanelController _panelController;
+    private string _currentOpenPanel = null;
+
+    // 动画状态
+    private bool _isUpgradeGlowActive = false;
+    private float _lastGold = 0;
 
     // 冷却状态
-    private float _offlineDoubleCooldownEnd = 0f;
-    private float _speedUpCooldownEnd = 0f;
-    private float _extraGoldCooldownEnd = 0f;
-
-    // 升级特效状态
-    private bool _isUpgradeGlowActive = false;
+    private float _offlineDoubleCooldownEnd = 0;
+    private float _speedUpCooldownEnd = 0;
+    private float _extraGoldCooldownEnd = 0;
 
     // 离线奖励回调
     private Action _offlineDoubleCallback;
+
+    // 待显示的伤害队列（防止伤害数字太多重叠）
+    private readonly Queue<Action> _pendingDamageQueue = new Queue<Action>();
+    private const float DamageQueueInterval = 0.05f;
+    private float _lastDamageShowTime = 0;
+
+    #endregion
+
+    #region === Unity 生命周期 ===
 
     private void Awake()
     {
@@ -93,13 +116,15 @@ public class UIManager : MonoBehaviour
             return;
         }
         Instance = this;
+
+        _panelController = FindObjectOfType<UIPanelController>();
+        CacheComponents();
     }
 
     private void Start()
     {
-        CacheComponents();
-        InitializePanelController();
-        SubscribeToEvents();
+        Initialize();
+        SubscribeEvents();
         RefreshAllUI();
     }
 
@@ -107,13 +132,23 @@ public class UIManager : MonoBehaviour
     {
         UpdateCooldownUI();
         UpdateUpgradeGlow();
+        UpdateDamageQueue();
     }
+
+    private void OnDestroy()
+    {
+        UnsubscribeEvents();
+
+        if (Instance == this)
+            Instance = null;
+    }
+
+    #endregion
 
     #region === 初始化 ===
 
     private void CacheComponents()
     {
-        // 自动查找组件（按层级路径）
         Transform canvas = transform;
 
         // 状态栏
@@ -165,75 +200,49 @@ public class UIManager : MonoBehaviour
         _shopPanel = FindGameObject(canvas, "ShopPanel");
         _settingsPopup = FindGameObject(canvas, "SettingsPopup");
 
-        // === 注入徽章引用到 NotificationBadge 单例 ===
-        if (NotificationBadge.Instance != null)
-        {
-            if (_equipBadge != null)
-                NotificationBadge.Instance.InjectBadge(NotificationBadge.BadgeType.EquipBadge, _equipBadge);
-            if (_checkInBadge != null)
-                NotificationBadge.Instance.InjectBadge(NotificationBadge.BadgeType.CheckInBadge, _checkInBadge);
-            if (_questBadge != null)
-                NotificationBadge.Instance.InjectBadge(NotificationBadge.BadgeType.QuestBadge, _questBadge);
-        }
-
         // 弹窗
         _rewardPopup = FindGameObject(canvas, "RewardPopup");
         _rewardText = FindComponent<TextMeshProUGUI>(canvas, "RewardPopup/RewardText");
 
-        Debug.Log("[UIManager] Components cached.");
+        Debug.Log("[GameUI] Components cached.");
     }
 
-    private void InitializePanelController()
+    private void Initialize()
     {
-        if (_panelController == null)
-            _panelController = FindObjectOfType<UIPanelController>();
-
-        // 初始化面板控制器（如果没有配置，自动检测）
-        if (_panelController != null)
-        {
-            // 注册面板到控制器
-            RegisterPanelsToController();
-        }
-    }
-
-    private void RegisterPanelsToController()
-    {
-        // 如果面板控制器已有配置，跳过
-        // 否则手动注册
-    }
-
-    private void SubscribeToEvents()
-    {
-        // === 按钮事件绑定 ===
+        // 按钮事件绑定
         if (_upgradeButton != null)
             _upgradeButton.onClick.AddListener(OnUpgradeButtonClicked);
 
         if (_offlineDoubleButton != null)
             _offlineDoubleButton.onClick.AddListener(OnOfflineDoubleClicked);
-
         if (_speedUpButton != null)
             _speedUpButton.onClick.AddListener(OnSpeedUpClicked);
-
         if (_extraGoldButton != null)
             _extraGoldButton.onClick.AddListener(OnExtraGoldClicked);
 
-        // === 面板按钮 ===
         if (_equipButton != null)
             _equipButton.onClick.AddListener(OnEquipButtonClicked);
-
         if (_checkInButton != null)
             _checkInButton.onClick.AddListener(OnCheckInButtonClicked);
-
         if (_questButton != null)
             _questButton.onClick.AddListener(OnQuestButtonClicked);
-
         if (_shopButton != null)
             _shopButton.onClick.AddListener(OnShopButtonClicked);
-
         if (_settingsButton != null)
             _settingsButton.onClick.AddListener(OnSettingsButtonClicked);
 
-        // === 游戏事件订阅 ===
+        // 关闭初始状态
+        if (_upgradeEffectGlow != null)
+            _upgradeEffectGlow.SetActive(false);
+
+        if (_rewardPopup != null)
+            _rewardPopup.SetActive(false);
+
+        Debug.Log("[GameUI] Initialized.");
+    }
+
+    private void SubscribeEvents()
+    {
         if (GameManager.Instance == null) return;
 
         var pm = GameManager.Instance.PlayerManager;
@@ -253,7 +262,6 @@ public class UIManager : MonoBehaviour
             bm.OnMonsterKilled += OnMonsterKilled;
             bm.OnWaveChanged += OnWaveChanged;
             bm.OnPlayerDamaged += OnPlayerDamaged;
-            bm.OnCrit += OnCrit;
         }
 
         if (em != null)
@@ -261,32 +269,72 @@ public class UIManager : MonoBehaviour
             em.OnOfflineEarningsCalculated += OnOfflineEarningsCalculated;
         }
 
-        // === 装备系统 ===
+        // 装备系统事件
         if (EquipmentManager.Instance != null)
         {
-            // 装备变化时更新红点
+            // EquipmentManager 有事件的话订阅
         }
 
-        // === 签到系统 ===
+        // 签到系统事件
         if (DailyCheckInManager.Instance != null)
         {
             DailyCheckInManager.Instance.OnCheckInClaimed += OnCheckInClaimed;
             DailyCheckInManager.Instance.OnStreakUpdated += OnStreakUpdated;
         }
 
-        // === 任务系统 ===
+        // 任务系统事件
         if (DailyQuestManager.Instance != null)
         {
             DailyQuestManager.Instance.OnQuestCompleted += OnQuestCompleted;
             DailyQuestManager.Instance.OnQuestClaimed += OnQuestClaimed;
         }
+    }
 
-        Debug.Log("[UIManager] Events subscribed.");
+    private void UnsubscribeEvents()
+    {
+        if (GameManager.Instance != null)
+        {
+            var pm = GameManager.Instance.PlayerManager;
+            var bm = GameManager.Instance.BattleManager;
+            var em = GameManager.Instance.EconomyManager;
+
+            if (pm != null)
+            {
+                pm.OnGoldChanged -= OnGoldChanged;
+                pm.OnLevelUp -= OnLevelUp;
+            }
+
+            if (bm != null)
+            {
+                bm.OnMonsterSpawned -= OnMonsterSpawned;
+                bm.OnMonsterDamaged -= OnMonsterDamaged;
+                bm.OnMonsterKilled -= OnMonsterKilled;
+                bm.OnWaveChanged -= OnWaveChanged;
+                bm.OnPlayerDamaged -= OnPlayerDamaged;
+            }
+
+            if (em != null)
+            {
+                em.OnOfflineEarningsCalculated -= OnOfflineEarningsCalculated;
+            }
+        }
+
+        if (DailyCheckInManager.Instance != null)
+        {
+            DailyCheckInManager.Instance.OnCheckInClaimed -= OnCheckInClaimed;
+            DailyCheckInManager.Instance.OnStreakUpdated -= OnStreakUpdated;
+        }
+
+        if (DailyQuestManager.Instance != null)
+        {
+            DailyQuestManager.Instance.OnQuestCompleted -= OnQuestCompleted;
+            DailyQuestManager.Instance.OnQuestClaimed -= OnQuestClaimed;
+        }
     }
 
     #endregion
 
-    #region === 刷新方法 ===
+    #region === Update 方法（核心） ===
 
     /// <summary>
     /// 刷新所有UI
@@ -296,37 +344,50 @@ public class UIManager : MonoBehaviour
         if (GameManager.Instance == null) return;
 
         var data = GameManager.Instance.PlayerManager.Data;
-        var bm = GameManager.Instance.BattleManager;
 
         UpdateGold(data.gold);
         UpdateLevel(data.level);
-        UpdateWave(bm != null ? bm.CurrentWave : 1);
+        UpdateWave(GameManager.Instance.BattleManager.CurrentWave);
         UpdateDPS(data.GetCurrentAttack());
         UpdateUpgradeButton(data.GetUpgradeCost(), data.gold >= data.GetUpgradeCost());
         UpdateAdButtons();
         UpdateAllBadges();
 
-        Debug.Log("[UIManager] All UI refreshed.");
+        Debug.Log("[GameUI] All UI refreshed.");
     }
 
+    /// <summary>
+    /// 更新金币显示
+    /// </summary>
     public void UpdateGold(long gold)
     {
         if (_goldText != null)
             _goldText.text = FormatNumber(gold);
+
+        _lastGold = gold;
     }
 
+    /// <summary>
+    /// 更新等级显示
+    /// </summary>
     public void UpdateLevel(int level)
     {
         if (_levelText != null)
             _levelText.text = $"等级 {level}";
     }
 
+    /// <summary>
+    /// 更新波次显示
+    /// </summary>
     public void UpdateWave(int wave)
     {
         if (_waveText != null)
             _waveText.text = $"波次 {wave}";
     }
 
+    /// <summary>
+    /// 更新DPS显示
+    /// </summary>
     public void UpdateDPS(float attack)
     {
         if (_dpsText != null)
@@ -336,6 +397,9 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 更新离线时间显示
+    /// </summary>
     public void UpdateOfflineTime(float hours)
     {
         if (_offlineTimeText != null)
@@ -345,6 +409,9 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 更新升级按钮状态
+    /// </summary>
     public void UpdateUpgradeButton(long cost, bool canAfford)
     {
         if (_upgradeCostText != null)
@@ -357,6 +424,9 @@ public class UIManager : MonoBehaviour
             _upgradeButton.interactable = canAfford;
     }
 
+    /// <summary>
+    /// 更新怪物信息显示
+    /// </summary>
     public void UpdateMonster(string name, float currentHP, float maxHP, int level = 1)
     {
         if (_monsterNameText != null)
@@ -375,6 +445,9 @@ public class UIManager : MonoBehaviour
             _monsterLevelBadge.text = $"Lv.{level}";
     }
 
+    /// <summary>
+    /// 更新激励视频按钮状态
+    /// </summary>
     public void UpdateAdButtons()
     {
         float now = Time.time;
@@ -407,30 +480,25 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 更新所有红点Badge
+    /// </summary>
     public void UpdateAllBadges()
     {
-        // 委托给 NotificationBadge 单例统一管理（带脉冲动画）
-        if (NotificationBadge.Instance != null)
-        {
-            NotificationBadge.Instance.CheckAllBadges();
-            return;
-        }
-
-        // 兜底：NotificationBadge 未就绪时使用原始逻辑
-        // 装备红点
+        // 装备红点（背包有新装备）
         if (_equipBadge != null && EquipmentManager.Instance != null)
         {
-            int ownedCount = EquipmentManager.Instance.GetOwnedEquipment().Count;
-            _equipBadge.gameObject.SetActive(ownedCount > 0);
+            bool hasNew = EquipmentManager.Instance.GetOwnedEquipment().Count > 0;
+            _equipBadge.gameObject.SetActive(hasNew);
         }
 
-        // 签到红点
+        // 签到红点（今日未签到）
         if (_checkInBadge != null && DailyCheckInManager.Instance != null)
         {
             _checkInBadge.gameObject.SetActive(DailyCheckInManager.Instance.CanCheckInToday);
         }
 
-        // 任务红点
+        // 任务红点（有可领取）
         if (_questBadge != null && DailyQuestManager.Instance != null)
         {
             _questBadge.gameObject.SetActive(DailyQuestManager.Instance.GetClaimableCount() > 0);
@@ -439,8 +507,11 @@ public class UIManager : MonoBehaviour
 
     #endregion
 
-    #region === Update 循环 ===
+    #region === Update 循环方法 ===
 
+    /// <summary>
+    /// 更新冷却UI（每帧）
+    /// </summary>
     private void UpdateCooldownUI()
     {
         float now = Time.time;
@@ -451,7 +522,10 @@ public class UIManager : MonoBehaviour
             bool onCooldown = now < _offlineDoubleCooldownEnd;
             _offlineDoubleCooldown.gameObject.SetActive(onCooldown);
             if (onCooldown)
-                _offlineDoubleCooldown.fillAmount = Mathf.Clamp01((_offlineDoubleCooldownEnd - now) / 60f);
+            {
+                float remaining = _offlineDoubleCooldownEnd - now;
+                _offlineDoubleCooldown.fillAmount = Mathf.Clamp01(remaining / 60f);
+            }
         }
 
         // 加速冷却
@@ -460,7 +534,10 @@ public class UIManager : MonoBehaviour
             bool onCooldown = now < _speedUpCooldownEnd;
             _speedUpCooldown.gameObject.SetActive(onCooldown);
             if (onCooldown)
-                _speedUpCooldown.fillAmount = Mathf.Clamp01((_speedUpCooldownEnd - now) / 30f);
+            {
+                float remaining = _speedUpCooldownEnd - now;
+                _speedUpCooldown.fillAmount = Mathf.Clamp01(remaining / 30f);
+            }
         }
 
         // 额外金币冷却
@@ -469,10 +546,16 @@ public class UIManager : MonoBehaviour
             bool onCooldown = now < _extraGoldCooldownEnd;
             _extraGoldCooldown.gameObject.SetActive(onCooldown);
             if (onCooldown)
-                _extraGoldCooldown.fillAmount = Mathf.Clamp01((_extraGoldCooldownEnd - now) / 60f);
+            {
+                float remaining = _extraGoldCooldownEnd - now;
+                _extraGoldCooldown.fillAmount = Mathf.Clamp01(remaining / 60f);
+            }
         }
     }
 
+    /// <summary>
+    /// 更新升级按钮发光效果
+    /// </summary>
     private void UpdateUpgradeGlow()
     {
         if (GameManager.Instance == null || _upgradeEffectGlow == null) return;
@@ -485,6 +568,7 @@ public class UIManager : MonoBehaviour
         if (shouldGlow != _isUpgradeGlowActive)
         {
             _isUpgradeGlowActive = shouldGlow;
+
             _upgradeEffectGlow.SetActive(shouldGlow);
 
             if (shouldGlow)
@@ -494,27 +578,49 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 更新伤害数字队列（防止太多重叠）
+    /// </summary>
+    private void UpdateDamageQueue()
+    {
+        if (_pendingDamageQueue.Count == 0) return;
+
+        if (Time.time - _lastDamageShowTime >= DamageQueueInterval)
+        {
+            _lastDamageShowTime = Time.time;
+            var action = _pendingDamageQueue.Dequeue();
+            action?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// 添加伤害数字到队列
+    /// </summary>
+    public void QueueDamage(float damage, Vector3 worldPos, bool isCrit = false)
+    {
+        _pendingDamageQueue.Enqueue(() =>
+        {
+            if (DamagePopupManager.Instance != null)
+            {
+                DamagePopupManager.Instance.ShowDamage((int)damage, isCrit, worldPos);
+            }
+        });
+    }
+
     #endregion
 
     #region === 按钮事件处理 ===
 
     private void OnUpgradeButtonClicked()
     {
-        if (_upgradeButton != null)
-            DOTweenAnimations.ButtonClickScale(_upgradeButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
+        DOTweenAnimations.ButtonClickScale(_upgradeButton);
 
         if (GameManager.Instance?.PlayerManager != null)
         {
             bool success = GameManager.Instance.PlayerManager.TryUpgrade();
-            if (success)
+            if (!success)
             {
-                // 升级成功特效
-                if (ParticleEffectManager.Instance != null)
-                    ParticleEffectManager.Instance.PlayEffect(EffectType.Upgrade, Vector3.zero);
-            }
-            else
-            {
+                // 金币不足反馈
                 var rect = _upgradeButton?.GetComponent<RectTransform>();
                 if (rect != null)
                     DOTweenAnimations.ShakeScale(rect);
@@ -525,8 +631,6 @@ public class UIManager : MonoBehaviour
     private void OnOfflineDoubleClicked()
     {
         DOTweenAnimations.ButtonClickScale(_offlineDoubleButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (Time.time < _offlineDoubleCooldownEnd)
         {
@@ -550,8 +654,6 @@ public class UIManager : MonoBehaviour
     private void OnSpeedUpClicked()
     {
         DOTweenAnimations.ButtonClickScale(_speedUpButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (Time.time < _speedUpCooldownEnd)
         {
@@ -575,8 +677,6 @@ public class UIManager : MonoBehaviour
     private void OnExtraGoldClicked()
     {
         DOTweenAnimations.ButtonClickScale(_extraGoldButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (Time.time < _extraGoldCooldownEnd)
         {
@@ -602,78 +702,71 @@ public class UIManager : MonoBehaviour
     private void OnEquipButtonClicked()
     {
         DOTweenAnimations.ButtonClickScale(_equipButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (_panelController != null)
             _panelController.TogglePanel("Equipment");
-        else if (_equipmentPanel != null)
+        else
             TogglePanelDirect(_equipmentPanel);
     }
 
     private void OnCheckInButtonClicked()
     {
         DOTweenAnimations.ButtonClickScale(_checkInButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (_panelController != null)
             _panelController.TogglePanel("CheckIn");
-        else if (_checkInPanel != null)
+        else
             TogglePanelDirect(_checkInPanel);
     }
 
     private void OnQuestButtonClicked()
     {
         DOTweenAnimations.ButtonClickScale(_questButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (_panelController != null)
             _panelController.TogglePanel("Quest");
-        else if (_questPanel != null)
+        else
             TogglePanelDirect(_questPanel);
     }
 
     private void OnShopButtonClicked()
     {
         DOTweenAnimations.ButtonClickScale(_shopButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (_panelController != null)
             _panelController.TogglePanel("Shop");
-        else if (_shopPanel != null)
+        else
             TogglePanelDirect(_shopPanel);
     }
 
     private void OnSettingsButtonClicked()
     {
         DOTweenAnimations.ButtonClickScale(_settingsButton);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
 
         if (_panelController != null)
             _panelController.TogglePanel("Settings");
-        else if (_settingsPopup != null)
+        else
             TogglePanelDirect(_settingsPopup);
     }
 
     private void TogglePanelDirect(GameObject panel)
     {
+        if (panel == null) return;
+
         if (panel.activeSelf)
         {
-            // 统一使用 DOTweenAnimations.SlideOutDown（向上滑出）
             var rect = panel.GetComponent<RectTransform>();
             if (rect != null)
-                DOTweenAnimations.SlideOutDown(rect, 0.3f);
+                DOTweenAnimations.SlideOutUp(rect, 0.3f).OnComplete(() => panel.SetActive(false));
             else
                 panel.SetActive(false);
         }
         else
         {
-            // 统一使用 DOTweenAnimations.SlideInUp（从底部滑入）
-            DOTweenAnimations.SlideInUp(panel, 0.3f);
+            panel.SetActive(true);
+            var rect = panel.GetComponent<RectTransform>();
+            if (rect != null)
+                DOTweenAnimations.SlideInDown(rect, 0.3f);
         }
     }
 
@@ -695,15 +788,8 @@ public class UIManager : MonoBehaviour
     private void OnLevelUp(int newLevel)
     {
         UpdateLevel(newLevel);
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Upgrade);
 
-        ShowReward($"🎉 升级到 {newLevel} 级！");
-
-        // 升级粒子特效
-        if (ParticleEffectManager.Instance != null)
-            ParticleEffectManager.Instance.PlayEffect(EffectType.Upgrade, Vector3.zero);
-
-        // 伤害数字显示升级特效
+        // 升级特效
         if (DamagePopupManager.Instance != null)
         {
             Vector3 monsterPos = Vector3.zero;
@@ -712,6 +798,8 @@ public class UIManager : MonoBehaviour
 
             DamagePopupManager.Instance.ShowLevelUp(newLevel, monsterPos);
         }
+
+        ShowLevelUpEffect(newLevel);
     }
 
     private void OnMonsterSpawned(MonsterData monster)
@@ -725,13 +813,10 @@ public class UIManager : MonoBehaviour
         if (monster == null) return;
         UpdateMonster(monster.monsterName, monster.currentHealth, monster.maxHealth, monster.level);
 
-        // 显示伤害数字
-        if (DamagePopupManager.Instance != null)
-        {
-            Vector3 worldPos = monster.transform != null ? monster.transform.position : Vector3.zero;
-            bool isCrit = damage > monster.maxHealth * 0.1f;
-            DamagePopupManager.Instance.ShowDamage((int)damage, isCrit, worldPos);
-        }
+        // 显示伤害数字（使用队列避免重叠）
+        Vector3 worldPos = monster.transform != null ? monster.transform.position : Vector3.zero;
+        bool isCrit = damage > monster.maxHealth * 0.1f; // 简单暴击判断
+        QueueDamage(damage, worldPos, isCrit);
 
         // 血条抖动
         if (_monsterHealthBar != null)
@@ -745,11 +830,6 @@ public class UIManager : MonoBehaviour
     private void OnMonsterKilled(MonsterData monster, long reward)
     {
         ShowReward($"+{FormatNumber(reward)} 金币");
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Kill);
-
-        // 金币粒子爆发
-        if (ParticleEffectManager.Instance != null && monster != null)
-            ParticleEffectManager.Instance.PlayEffect(EffectType.CoinBurst, monster.transform.position);
 
         // 显示金币特效
         if (DamagePopupManager.Instance != null && monster != null)
@@ -762,23 +842,10 @@ public class UIManager : MonoBehaviour
     {
         UpdateWave(newWave);
 
-        // 波次切换大字动画
+        // 波次大字动画
         if (_waveText != null)
         {
             DOTweenAnimations.WaveAnnounce(_waveText, newWave, 1.5f);
-        }
-    }
-
-    private void OnCrit()
-    {
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Crit);
-
-        // 暴击粒子效果（短暂在屏幕中心爆发）
-        if (ParticleEffectManager.Instance != null)
-        {
-            var cam = Camera.main;
-            if (cam != null)
-                ParticleEffectManager.Instance.PlayEffect(EffectType.Upgrade, cam.transform.position + cam.transform.forward * 2f);
         }
     }
 
@@ -815,7 +882,6 @@ public class UIManager : MonoBehaviour
     private void OnCheckInClaimed(int day, CheckInDay reward)
     {
         ShowReward($"签到奖励\n+{reward.rewardAmount} {(reward.rewardType == RewardType.Gold ? "金币" : "物品")}");
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Reward);
         UpdateAllBadges();
     }
 
@@ -833,14 +899,21 @@ public class UIManager : MonoBehaviour
     private void OnQuestClaimed(DailyQuest quest, long reward)
     {
         ShowReward($"任务奖励\n+{FormatNumber(reward)} 金币");
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Reward);
         UpdateAllBadges();
     }
 
     #endregion
 
-    #region === 弹窗与提示 ===
+    #region === 特效与提示 ===
 
+    private void ShowLevelUpEffect(int level)
+    {
+        ShowReward($"🎉 升级到 {level} 级！");
+    }
+
+    /// <summary>
+    /// 显示奖励弹窗
+    /// </summary>
     public void ShowReward(string message)
     {
         if (_rewardPopup != null && _rewardText != null)
@@ -856,15 +929,9 @@ public class UIManager : MonoBehaviour
         }
     }
 
-    private void HideReward()
-    {
-        if (_rewardPopup != null)
-        {
-            var rect = _rewardPopup.GetComponent<RectTransform>();
-            rect.PopOut(0.2f, () => _rewardPopup.SetActive(false));
-        }
-    }
-
+    /// <summary>
+    /// 显示离线奖励弹窗
+    /// </summary>
     public void ShowOfflineRewardPopup(string message, Action onDoubleClick)
     {
         _offlineDoubleCallback = onDoubleClick;
@@ -881,27 +948,43 @@ public class UIManager : MonoBehaviour
             var rect = _rewardPopup.GetComponent<RectTransform>();
             rect.PopIn(0.3f);
 
-            CancelInvoke(nameof(HideReward));
-            Invoke(nameof(HideOfflineRewardPopupAuto), 5f);
+            CancelInvoke(nameof(HideOfflineRewardAuto));
+            Invoke(nameof(HideOfflineRewardAuto), 5f);
         }
     }
 
-    private void HideOfflineRewardPopupAuto()
+    private void HideReward()
+    {
+        if (_rewardPopup != null)
+        {
+            var rect = _rewardPopup.GetComponent<RectTransform>();
+            rect.PopOut(0.2f, () => _rewardPopup.SetActive(false));
+        }
+    }
+
+    private void HideOfflineRewardAuto()
     {
         HideReward();
+        _offlineDoubleCallback?.Invoke();
         _offlineDoubleCallback = null;
     }
 
+    /// <summary>
+    /// 显示 Toast 提示
+    /// </summary>
     public void ShowToast(string message)
     {
         Debug.Log($"[Toast] {message}");
-        // TODO: 实现 Toast 提示 UI
+        // TODO: 实现实际的 Toast UI
     }
 
     #endregion
 
     #region === 辅助方法 ===
 
+    /// <summary>
+    /// 格式化数字显示（K/M/B）
+    /// </summary>
     private string FormatNumber(long num)
     {
         if (num >= 1000000000)
@@ -927,7 +1010,7 @@ public class UIManager : MonoBehaviour
 
     #endregion
 
-    #region === 面板控制（对外接口） ===
+    #region === 公共接口 ===
 
     /// <summary>
     /// 关闭所有面板
@@ -943,87 +1026,6 @@ public class UIManager : MonoBehaviour
     public bool IsPanelOpen(string panelName)
     {
         return _panelController != null && _panelController.IsPanelOpen(panelName);
-    }
-
-    #endregion
-
-    /// <summary>
-    /// 显示装备强化特效（由 EquipmentManager 调用）
-    /// </summary>
-    public void ShowEquipmentUpgradeEffect(EquipmentData equipment)
-    {
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Upgrade);
-
-        if (ParticleEffectManager.Instance != null)
-        {
-            // 在屏幕中心播放强化光柱
-            var cam = Camera.main;
-            if (cam != null)
-            {
-                Vector3 pos = cam.transform.position + cam.transform.forward * 3f;
-                ParticleEffectManager.Instance.PlayEffect(EffectType.EnhanceBeam, pos);
-            }
-        }
-    }
-
-    /// <summary>
-    /// 显示装备穿戴特效（由 EquipmentManager 调用）
-    /// </summary>
-    public void ShowEquipGlowEffect(Transform slotTransform)
-    {
-        SoundManager.Instance?.PlaySFX(SoundType.SFX_Click);
-
-        if (ParticleEffectManager.Instance != null && slotTransform != null)
-            ParticleEffectManager.Instance.PlayEffect(EffectType.EquipGlow, slotTransform);
-    }
-
-    #region === 生命周期 ===
-
-    private void OnDestroy()
-    {
-        // 取消订阅
-        if (GameManager.Instance != null)
-        {
-            var pm = GameManager.Instance.PlayerManager;
-            var bm = GameManager.Instance.BattleManager;
-            var em = GameManager.Instance.EconomyManager;
-
-            if (pm != null)
-            {
-                pm.OnGoldChanged -= OnGoldChanged;
-                pm.OnLevelUp -= OnLevelUp;
-            }
-
-            if (bm != null)
-            {
-                bm.OnMonsterSpawned -= OnMonsterSpawned;
-                bm.OnMonsterDamaged -= OnMonsterDamaged;
-                bm.OnMonsterKilled -= OnMonsterKilled;
-                bm.OnWaveChanged -= OnWaveChanged;
-                bm.OnPlayerDamaged -= OnPlayerDamaged;
-                bm.OnCrit -= OnCrit;
-            }
-
-            if (em != null)
-            {
-                em.OnOfflineEarningsCalculated -= OnOfflineEarningsCalculated;
-            }
-        }
-
-        if (DailyCheckInManager.Instance != null)
-        {
-            DailyCheckInManager.Instance.OnCheckInClaimed -= OnCheckInClaimed;
-            DailyCheckInManager.Instance.OnStreakUpdated -= OnStreakUpdated;
-        }
-
-        if (DailyQuestManager.Instance != null)
-        {
-            DailyQuestManager.Instance.OnQuestCompleted -= OnQuestCompleted;
-            DailyQuestManager.Instance.OnQuestClaimed -= OnQuestClaimed;
-        }
-
-        if (Instance == this)
-            Instance = null;
     }
 
     #endregion

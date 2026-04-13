@@ -85,6 +85,25 @@ public class PlayerManager : MonoBehaviour
     }
 
     /// <summary>
+    /// 直接消耗金币（不检查余额，用于任务刷新等）
+    /// </summary>
+    public void SpendGold(long amount)
+    {
+        Data.gold = Mathf.Max(0, Data.gold - amount);
+        OnGoldChanged?.Invoke(Data.gold);
+        OnDataChanged?.Invoke(Data);
+    }
+
+    /// <summary>
+    /// 添加钻石（暂未实现，stub）
+    /// </summary>
+    public void AddGem(int amount)
+    {
+        // 钻石系统暂未实现，log提示
+        Debug.Log($"[PlayerManager] AddGem called with {amount} - Gem system not implemented");
+    }
+
+    /// <summary>
     /// 获取每秒金币收益（用于离线计算）
     /// </summary>
     public float GetGoldPerSecond()

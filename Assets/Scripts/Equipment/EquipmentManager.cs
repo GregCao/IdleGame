@@ -192,9 +192,9 @@ public class EquipmentManager : Singleton<EquipmentManager>
             }
         }
         
-        if (EconomyManager.Instance != null)
+        if (GameManager.Instance?.PlayerManager != null)
         {
-            EconomyManager.Instance.AddGold(sellPrice);
+            GameManager.Instance.PlayerManager.AddGold(sellPrice);
         }
         
         UpdateEquipmentBonuses();

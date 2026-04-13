@@ -10,6 +10,7 @@ public class BattleManager : MonoBehaviour
     [Header("战斗配置")]
     [SerializeField] private float _playerAttackInterval = 1f;  // 玩家攻击间隔
     [SerializeField] private float _monsterAttackInterval = 2f;  // 怪物攻击间隔
+    [SerializeField] private float _tickInterval = 1f;  // 每tick间隔（秒）
     
     private float _playerAttackTimer = 0f;
     private float _monsterAttackTimer = 0f;
@@ -25,6 +26,7 @@ public class BattleManager : MonoBehaviour
     public UnityEvent OnBattleStarted;
     public UnityEvent OnPlayerDamaged;
     public UnityEvent<float> OnPlayerHealed;
+    public UnityEvent OnCrit;
 
     public int CurrentWave { get; private set; } = 1;
     public MonsterData CurrentMonster => _currentMonster;
@@ -104,6 +106,7 @@ public class BattleManager : MonoBehaviour
         {
             critMultiplier = GameManager.Instance.PlayerManager.Data.critDamage;
             Debug.Log("[BattleManager] CRITICAL HIT!");
+            OnCrit?.Invoke();
         }
         
         float baseDamage = (baseAttack + equipmentAttack) * critMultiplier;

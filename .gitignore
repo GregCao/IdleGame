@@ -1,0 +1,57 @@
+# Unity .gitignore
+# https://github.com/github/gitignore/blob/main/Unity.gitignore
+
+# Unity
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+
+# Monodevelop
+*.pidb.meta
+
+# IDE
+.idea/
+*.swp
+*~
+
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Build
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# Test
+[Tt]est[Pp]lay[Hh]ands/
+
+# Script files (keep source)
+# Assets/Scripts/**
+!.gitkeep
+
+# Prefabs (if any)
+# Assets/Prefabs/**
+!.gitkeep
+
+# Scenes (if any)
+# Assets/Scenes/**
+!.gitkeep

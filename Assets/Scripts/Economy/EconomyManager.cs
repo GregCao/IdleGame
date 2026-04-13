@@ -68,6 +68,10 @@ public class EconomyManager : MonoBehaviour
                 OnOfflineEarningsCalculated?.Invoke(offlineGold);
             }
         }
+
+        // 清除离线时间戳，防止重复发放
+        PlayerPrefs.DeleteKey(OFFLINE_KEY);
+        PlayerPrefs.Save();
     }
 
     /// <summary>
